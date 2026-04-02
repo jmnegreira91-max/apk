@@ -1,31 +1,17 @@
-name: Build_Trading_APK
-on: [push] # Se activa cada vez que subes cambios desde VS Code
-
+name: Build APK
+on: [push]
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
-      # Instalar dependencias necesarias para Android
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-pip build-essential git python3 dev ffmpeg libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev zlib1g-dev
-          sudo apt-get install -y libgstreamer1.0-gstreamer-lite-dev libgstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good
-          pip3 install --user --upgrade Cython==0.29.33 virtualenv
-
-      # Usar la acción oficial de Buildozer para crear la APK
       - name: Build with Buildozer
         uses: ArtemSerebriakov/buildozer-action@v1
         with:
           buildozer_version: master
           command: buildozer android debug
-          repository_root: .
-
-      # Guardar el archivo APK para que lo puedas descargar
-      - name: Upload Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v3
         with:
-          name: Mi_App_SPY_OTM
+          name: Mi_App_SPY
           path: bin/*.apk
