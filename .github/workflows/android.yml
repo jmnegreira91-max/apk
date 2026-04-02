@@ -1,129 +1,31 @@
-//+------------------------------------------------------------------+
-//|                                     Fortune100_AI_Ultra_Final.mq5|
-//+------------------------------------------------------------------+
-#property copyright "Trading Advisor"
-#property version   "1.00"
-#property strict
+name: Build_Trading_APK
+on: [push] # Se activa cada vez que subes cambios desde VS Code
 
-// --- INPUTS ---
-input group "Riesgo y Horario"
-input double   InpMaxLossPercent = 10.0;  
-input double   InpLotSize        = 0.1;   
-input int      InpStartHour      = 8;     
-input int      InpEndHour        = 21;    
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
 
-input group "IA Config"
-input int      InpTrailingStop   = 150;   
-input int      InpTrailingStep   = 20;    
+      # Instalar dependencias necesarias para Android
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip build-essential git python3 dev ffmpeg libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev zlib1g-dev
+          sudo apt-get install -y libgstreamer1.0-gstreamer-lite-dev libgstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+          pip3 install --user --upgrade Cython==0.29.33 virtualenv
 
-// --- GLOBALES ---
-double InitialDailyBalance;
-int    ConsecutiveLosses = 0;
-string CurrentMethod     = "TENDENCIA";
-int    BestRSIPeriod     = 14;
-int    hRSI;
+      # Usar la acción oficial de Buildozer para crear la APK
+      - name: Build with Buildozer
+        uses: ArtemSerebriakov/buildozer-action@v1
+        with:
+          buildozer_version: master
+          command: buildozer android debug
+          repository_root: .
 
-//+------------------------------------------------------------------+
-int OnInit() {
-   InitialDailyBalance = AccountInfoDouble(ACCOUNT_BALANCE);
-  
-   if(GlobalVariableCheck("Fortune_BestRSI")) {
-      BestRSIPeriod = (int)GlobalVariableGet("Fortune_BestRSI");
-      CurrentMethod = (GlobalVariableGet("Fortune_Method")==1)?"TENDENCIA":"RANGO";
-   }
-
-   hRSI = iRSI(_Symbol, _Period, BestRSIPeriod, PRICE_CLOSE);
-   EventSetTimer(3600);
-   return(INIT_SUCCEEDED);
-}
-
-void OnDeinit(const int reason) {
-   EventKillTimer();
-   ObjectsDeleteAll(0, "DB_"); // Limpiar Dashboard al salir
-}
-
-void OnTimer() {
-   // Simulación de optimización IA
-   BestRSIPeriod = (BestRSIPeriod == 14) ? 10 : 14;
-   GlobalVariableSet("Fortune_BestRSI", BestRSIPeriod);
-}
-
-void OnTick() {
-   MqlDateTime dt;
-   TimeCurrent(dt);
-   if(dt.hour < InpStartHour || dt.hour >= InpEndHour) return;
-
-   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
-   double dd = (InitialDailyBalance > 0) ? (1 - (eq / InitialDailyBalance)) * 100 : 0;
-  
-   if(dd >= InpMaxLossPercent) return;
-
-   ApplyTrailingStop();
-   if(PositionsTotal() == 0) CheckSignals();
-  
-   // LLAMADA AL DASHBOARD
-   UpdateDashboard(dd);
-}
-
-// --- SEÑALES ---
-void CheckSignals() {
-   double rsi[];
-   ArraySetAsSeries(rsi, true);
-   if(CopyBuffer(hRSI, 0, 0, 1, rsi) < 1) return;
-
-   MqlTradeRequest req = {}; MqlTradeResult res = {};
-   req.action = TRADE_ACTION_DEAL;
-   req.symbol = _Symbol;
-   req.volume = InpLotSize;
-   req.type_filling = ORDER_FILLING_FOK;
-   req.price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-
-   if(rsi[0] < 45) req.type = ORDER_TYPE_BUY;
-   else return;
-
-   if(!OrderSend(req, res)) Print("Error: ", res.retcode);
-}
-
-// --- TRAILING ---
-void ApplyTrailingStop() {
-   for(int i=PositionsTotal()-1; i>=0; i--) {
-      if(PositionGetSymbol(i)==_Symbol) {
-         ulong ticket = PositionGetInteger(POSITION_TICKET);
-         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         double sl = PositionGetDouble(POSITION_SL);
-         double open = PositionGetDouble(POSITION_PRICE_OPEN);
-         if(bid-open > InpTrailingStop*_Point) {
-            double nSL = bid - InpTrailingStop*_Point;
-            if(nSL > sl + InpTrailingStep*_Point) {
-               MqlTradeRequest r={}; MqlTradeResult s={};
-               r.action=TRADE_ACTION_SLTP; r.position=ticket;
-               r.sl=NormalizeDouble(nSL, _Digits);
-               OrderSend(r,s);
-            }
-         }
-      }
-   }
-}
-
-// --- DASHBOARD MULTILÍNEA (10 DATOS) ---
-void UpdateDashboard(double dd) {
-   string lines[7];
-   lines[0] = "=== FORTUNE100 AI ULTRA ===";
-   lines[1] = "1. Balance Inic: " + DoubleToString(InitialDailyBalance, 2);
-   lines[2] = "2. Metodo IA: " + CurrentMethod;
-   lines[3] = "3. RSI Optimo: " + IntegerToString(BestRSIPeriod);
-   lines[4] = "4. Drawdown: " + DoubleToString(dd, 2) + "%";
-   lines[5] = "5. Perdidas: " + IntegerToString(ConsecutiveLosses) + "/10";
-   lines[6] = "6. ESTADO: " + (dd >= InpMaxLossPercent ? "STOP OUT" : "OPERANDO");
-
-   for(int i=0; i<7; i++) {
-      string objName = "DB_Line_" + IntegerToString(i);
-      if(ObjectFind(0, objName) < 0) ObjectCreate(0, objName, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, objName, OBJPROP_XDISTANCE, 20);
-      ObjectSetInteger(0, objName, OBJPROP_YDISTANCE, 30 + (i * 20)); // Separa las líneas
-      ObjectSetString(0, objName, OBJPROP_TEXT, lines[i]);
-      ObjectSetInteger(0, objName, OBJPROP_COLOR, (i==0 || i==6) ? clrCyan : clrWhite);
-      ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, 11);
-   }
-   ChartRedraw();
-}
+      # Guardar el archivo APK para que lo puedas descargar
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Mi_App_SPY_OTM
+          path: bin/*.apk
